@@ -134,85 +134,34 @@ async function sheetsPost(webAppUrl, action, payload = {}) {
 
 // ─── AI VALIDATION ───────────────────────────────────────────────────────────
 async function validateWithAI(challenge, submittedCode) {
-  const prompt = `
-ORIGINAL BUGGY CODE:
-\`\`\`c
-${challenge.buggyCode}
-\`\`\`
+  const normalize = s => s.replace(/\s+/g, " ").trim();
+  const userCode = normalize(submittedCode);
 
-BUG: ${challenge.explanation}
-EXPECTED OUTPUT: ${challenge.expectedOutput}
+  // Check if the known fix is present
+  const fixes = {
+    1: "i < 5",
+    2: "return sum;",
+    3: "swap(&x, &y)",
+    4: "i++",
+    5: "dest[12]",
+    6: "%f",
+    7: "fact = 1",
+    8: "&&",
+    9: "scanf(\"%d\", &num)",
+    10: "if(b==0)"
+  };
 
-PARTICIPANT'S FIX:
-\`\`\`c
-${submittedCode}
-\`\`\`
+  const expectedFix = fixes[challenge.id];
+  const isCorrect = expectedFix
+    ? normalize(submittedCode).includes(normalize(expectedFix))
+    : false;
 
-Return ONLY valid JSON (no markdown, no extra text):
-{"correct":true/false,"feedback":"one sentence","simulatedOutput":"what it would print"}
-`;
-
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": process.env.ANTHROPIC_API_KEY,
-      "anthropic-version": "2023-06-01"
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 300,
-      system: "You are a strict C debugging evaluator. You must respond ONLY in valid JSON.",
-      messages: [{ role: "user", content: prompt }]
-    })
-  });
-
-  const data = await res.json();
-
-  const text = (data.content || [])
-    .map(block => block.text || "")
-    .join("")
-    .trim();
-
-  return safeParseJSON(text);
-}
-
-/**
- * 🔥 Ultra-safe JSON parser for LLM outputs
- */
-function safeParseJSON(text) {
-  if (!text) {
-    return fallback();
-  }
-
-  // 1. Direct parse attempt
-  try {
-    return JSON.parse(text);
-  } catch (_) {}
-
-  // 2. Remove code fences if present
-  const cleaned = text.replace(/```json|```/g, "").trim();
-  try {
-    return JSON.parse(cleaned);
-  } catch (_) {}
-
-  // 3. Extract JSON object using regex (most reliable fallback)
-  const match = cleaned.match(/\{[\s\S]*\}/);
-  if (match) {
-    try {
-      return JSON.parse(match[0]);
-    } catch (_) {}
-  }
-
-  // 4. Final fallback
-  return fallback();
-}
-
-function fallback() {
   return {
-    correct: false,
-    feedback: "Evaluation failed due to invalid model output.",
-    simulatedOutput: "—"
+    correct: isCorrect,
+    feedback: isCorrect
+      ? "Great fix! That's the correct solution."
+      : `Not quite. Hint: ${challenge.hint}`,
+    simulatedOutput: isCorrect ? challenge.expectedOutput : "Incorrect output"
   };
 }
 // ══════════════════════════════════════════════════════════════════════════════
