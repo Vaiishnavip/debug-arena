@@ -1,0 +1,384 @@
+import { useState, useEffect, useRef } from "react";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CONFIGURATION — Coordinator fills this once before the event
+// ─────────────────────────────────────────────────────────────────────────────
+const CONFIG_KEY = "debugarena-gsheet-config";
+
+// ─── C DEBUGGING CHALLENGES ──────────────────────────────────────────────────
+const CHALLENGES = [
+  {
+    id: 1, title: "Array Out of Bounds",
+    description: "This program should print numbers 1 to 5 using an array, but it crashes. Find and fix the bug.",
+    buggyCode: `#include <stdio.h>\nint main() {\n    int arr[5] = {1, 2, 3, 4, 5};\n    for (int i = 0; i <= 5; i++) {\n        printf("%d\\n", arr[i]);\n    }\n    return 0;\n}`,
+    hint: "Check the loop boundary condition carefully.",
+    expectedOutput: "1\n2\n3\n4\n5", points: 10, bugLine: 4,
+    explanation: "Loop uses i <= 5 causing out-of-bounds access. Should be i < 5."
+  },
+  {
+    id: 2, title: "Missing Return Statement",
+    description: "This function should return the sum of two integers but gives wrong results. Find and fix the bug.",
+    buggyCode: `#include <stdio.h>\nint add(int a, int b) {\n    int sum = a + b;\n}\nint main() {\n    int result = add(3, 7);\n    printf("Sum = %d\\n", result);\n    return 0;\n}`,
+    hint: "What should the add() function return?",
+    expectedOutput: "Sum = 10", points: 10, bugLine: 3,
+    explanation: "The add() function computes sum but never returns it. Add 'return sum;'."
+  },
+  {
+    id: 3, title: "Pointer Dereference Error",
+    description: "This program should swap two numbers using pointers but doesn't work. Fix the bug.",
+    buggyCode: `#include <stdio.h>\nvoid swap(int *a, int *b) {\n    int temp = *a;\n    *a = *b;\n    *b = temp;\n}\nint main() {\n    int x = 10, y = 20;\n    swap(x, y);\n    printf("x=%d y=%d\\n", x, y);\n    return 0;\n}`,
+    hint: "Are you passing the right things to the swap function?",
+    expectedOutput: "x=20 y=10", points: 15, bugLine: 9,
+    explanation: "swap(x, y) passes values, not addresses. Should be swap(&x, &y)."
+  },
+  {
+    id: 4, title: "Infinite Loop",
+    description: "This program should print numbers 1 to 10, but it runs forever. Fix the bug.",
+    buggyCode: `#include <stdio.h>\nint main() {\n    int i = 1;\n    while (i <= 10) {\n        printf("%d\\n", i);\n        i--;\n    }\n    return 0;\n}`,
+    hint: "Trace through the loop manually. What happens to i?",
+    expectedOutput: "1\n2\n3\n4\n5\n6\n7\n8\n9\n10", points: 10, bugLine: 6,
+    explanation: "i-- decrements i, causing it to never reach 10. Should be i++."
+  },
+  {
+    id: 5, title: "Buffer Too Small",
+    description: "This program should copy a string but causes a segmentation fault. Fix the bug.",
+    buggyCode: `#include <stdio.h>\n#include <string.h>\nint main() {\n    char *src = "Hello World";\n    char dest[5];\n    strcpy(dest, src);\n    printf("%s\\n", dest);\n    return 0;\n}`,
+    hint: "Is the destination buffer large enough?",
+    expectedOutput: "Hello World", points: 15, bugLine: 5,
+    explanation: "dest[5] is too small for 'Hello World' (12 chars). Should be dest[12] or larger."
+  },
+  {
+    id: 6, title: "Wrong Format Specifier",
+    description: "This program should print a float but prints garbage. Fix the bug.",
+    buggyCode: `#include <stdio.h>\nint main() {\n    float pi = 3.14159;\n    printf("Pi = %d\\n", pi);\n    return 0;\n}`,
+    hint: "What format specifier should be used for float?",
+    expectedOutput: "Pi = 3.141590", points: 10, bugLine: 4,
+    explanation: "%d is for integers. Use %f for float variables."
+  },
+  {
+    id: 7, title: "Uninitialized Variable",
+    description: "This program should calculate factorial of 5 but gives wrong output. Fix the bug.",
+    buggyCode: `#include <stdio.h>\nint main() {\n    int n = 5, fact, i;\n    for (i = 1; i <= n; i++) {\n        fact = fact * i;\n    }\n    printf("Factorial = %d\\n", fact);\n    return 0;\n}`,
+    hint: "What should fact start as before the loop?",
+    expectedOutput: "Factorial = 120", points: 10, bugLine: 3,
+    explanation: "fact is uninitialized. Initialize it to 1: int n=5, fact=1, i;"
+  },
+  {
+    id: 8, title: "Wrong Logical Operator",
+    description: "This program checks if a number is between 1 and 100 but gives wrong results. Fix the bug.",
+    buggyCode: `#include <stdio.h>\nint main() {\n    int n = 50;\n    if (n > 1 || n < 100) {\n        printf("In range\\n");\n    } else {\n        printf("Out of range\\n");\n    }\n    return 0;\n}`,
+    hint: "Think about which logical operator connects the two conditions.",
+    expectedOutput: "In range", points: 15, bugLine: 4,
+    explanation: "|| (OR) makes any number satisfy the condition. Should be && (AND)."
+  },
+  {
+    id: 9, title: "Missing Address Operator",
+    description: "This program reads an integer but crashes. Fix the bug. (Assume input is 42)",
+    buggyCode: `#include <stdio.h>\nint main() {\n    int num;\n    scanf("%d", num);\n    printf("You entered: %d\\n", num);\n    return 0;\n}`,
+    hint: "scanf needs to know WHERE to store the value.",
+    expectedOutput: "You entered: 42", points: 10, bugLine: 4,
+    explanation: "scanf requires the address of num. Should be scanf(\"%d\", &num)."
+  },
+  {
+    id: 10, title: "Division by Zero",
+    description: "This function divides two numbers but can crash. Add proper error handling.",
+    buggyCode: `#include <stdio.h>\nfloat divide(int a, int b) {\n    return a / b;\n}\nint main() {\n    printf("%.2f\\n", divide(10, 0));\n    return 0;\n}`,
+    hint: "What happens when b is zero? Add a check before dividing.",
+    expectedOutput: "Error: Division by zero", points: 20, bugLine: 3,
+    explanation: "No check for b==0. Add: if(b==0){ printf(\"Error: Division by zero\"); return 0; }"
+  }
+];
+
+const COORDINATOR_PASS = "coordinator2024";
+
+// ─── UTILITIES ───────────────────────────────────────────────────────────────
+function fmtTime(ms) {
+  const s = Math.floor(ms / 1000), m = Math.floor(s / 60);
+  return m > 0 ? `${m}m ${s % 60}s` : `${s}s`;
+}
+function fmtClock(s) {
+  return `${Math.floor(s/60).toString().padStart(2,"0")}:${(s%60).toString().padStart(2,"0")}`;
+}
+function scoreColor(score) {
+  return score >= 80 ? "#39ff14" : score >= 40 ? "#ffcc00" : "#ff6b35";
+}
+
+// ─── GOOGLE SHEETS API ───────────────────────────────────────────────────────
+// Uses a Google Apps Script Web App as a middleware
+// The coordinator sets up once and pastes the Web App URL
+
+async function sheetsCall(webAppUrl, action, payload = {}) {
+  try {
+    const url = `${webAppUrl}?action=${action}&payload=${encodeURIComponent(JSON.stringify(payload))}`;
+    const res = await fetch(url);
+    const text = await res.text();
+    return JSON.parse(text);
+  } catch (e) {
+    console.error("Sheets error:", e);
+    return { error: e.message };
+  }
+}
+
+async function sheetsPost(webAppUrl, action, payload = {}) {
+  try {
+    const res = await fetch(webAppUrl, {
+      method: "POST",
+      body: JSON.stringify({ action, ...payload }),
+    });
+    const text = await res.text();
+    return JSON.parse(text);
+  } catch (e) {
+    return { error: e.message };
+  }
+}
+
+// ─── AI VALIDATION ───────────────────────────────────────────────────────────
+async function validateWithAI(challenge, submittedCode) {
+  const prompt = `You are a strict C code evaluator for a debugging competition.
+
+ORIGINAL BUGGY CODE:
+\`\`\`c
+${challenge.buggyCode}
+\`\`\`
+BUG: ${challenge.explanation}
+EXPECTED OUTPUT: ${challenge.expectedOutput}
+
+PARTICIPANT'S FIX:
+\`\`\`c
+${submittedCode}
+\`\`\`
+
+Does this fix correctly resolve the bug? Be lenient on style, strict on logic.
+Reply ONLY with JSON, no markdown:
+{"correct":true/false,"feedback":"one sentence","simulatedOutput":"what it would print"}`;
+
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-20250514", max_tokens: 300,
+      messages: [{ role: "user", content: prompt }]
+    })
+  });
+  const data = await res.json();
+  const text = (data.content || []).map(b => b.text || "").join("");
+  try { return JSON.parse(text.replace(/```json|```/g, "").trim()); }
+  catch { return { correct: false, feedback: "Evaluation error. Try again.", simulatedOutput: "—" }; }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// MAIN APP
+// ══════════════════════════════════════════════════════════════════════════════
+export default function App() {
+  const [screen, setScreen] = useState("landing");
+  const [participant, setParticipant] = useState(null);
+  const [webAppUrl, setWebAppUrl] = useState(() => localStorage.getItem(CONFIG_KEY) || "");
+  const [configSet, setConfigSet] = useState(() => !!localStorage.getItem(CONFIG_KEY));
+
+  function saveConfig(url) {
+    localStorage.setItem(CONFIG_KEY, url);
+    setWebAppUrl(url); setConfigSet(true);
+  }
+
+  return (
+    <div style={S.app}>
+      <style>{CSS}</style>
+      {!configSet && screen !== "setup" && (
+        <div style={S.setupBanner}>
+          ⚠️ Google Sheets not configured.&nbsp;
+          <button style={S.inlineBtnLink} onClick={() => setScreen("setup")}>Configure Now →</button>
+        </div>
+      )}
+      {screen === "setup"       && <SetupScreen onSave={saveConfig} current={webAppUrl} onBack={() => setScreen("landing")} />}
+      {screen === "landing"     && <LandingScreen webAppUrl={webAppUrl} onParticipant={p => { setParticipant(p); setScreen("challenge"); }} onCoordinator={() => setScreen("coordinator")} onLeaderboard={() => setScreen("leaderboard")} onSetup={() => setScreen("setup")} />}
+      {screen === "challenge"   && <ChallengeScreen participant={participant} webAppUrl={webAppUrl} onLeaderboard={() => setScreen("leaderboard")} />}
+      {screen === "leaderboard" && <LeaderboardScreen webAppUrl={webAppUrl} onBack={() => setScreen(participant ? "challenge" : "landing")} />}
+      {screen === "coordinator" && <CoordinatorScreen webAppUrl={webAppUrl} onBack={() => setScreen("landing")} />}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SETUP SCREEN — coordinator configures once
+// ══════════════════════════════════════════════════════════════════════════════
+const APPS_SCRIPT_CODE = `// Paste this entire script into Google Apps Script
+// (Extensions > Apps Script in your Google Sheet)
+
+function doGet(e) {
+  return handleRequest(e.parameter.action, JSON.parse(decodeURIComponent(e.parameter.payload || "{}")));
+}
+function doPost(e) {
+  const body = JSON.parse(e.postData.contents);
+  return handleRequest(body.action, body);
+}
+function handleRequest(action, data) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let result = {};
+  if (action === "register") {
+    const sh = ss.getSheetByName("Participants") || ss.insertSheet("Participants");
+    if (sh.getLastRow() === 0) sh.appendRow(["Name","USN","Branch","JoinedAt"]);
+    const rows = sh.getDataRange().getValues();
+    const exists = rows.some(r => r[1] === data.usn);
+    if (!exists) sh.appendRow([data.name, data.usn, data.branch, new Date().toISOString()]);
+    result = { ok: true };
+  } else if (action === "submit") {
+    const sh = ss.getSheetByName("Submissions") || ss.insertSheet("Submissions");
+    if (sh.getLastRow() === 0) sh.appendRow(["USN","Name","Branch","QuestionID","QuestionTitle","TimeTakenMs","TimeTakenFormatted","Attempts","Correct","SubmittedAt"]);
+    sh.appendRow([data.usn, data.name, data.branch, data.qId, data.qTitle, data.timeTakenMs, data.timeFmt, data.attempts, data.correct ? "YES" : "NO", new Date().toISOString()]);
+    result = { ok: true };
+  } else if (action === "leaderboard") {
+    const pSh = ss.getSheetByName("Participants");
+    const sSh = ss.getSheetByName("Submissions");
+    const participants = pSh ? pSh.getDataRange().getValues().slice(1) : [];
+    const submissions  = sSh ? sSh.getDataRange().getValues().slice(1) : [];
+    result = { participants, submissions };
+  } else if (action === "ping") {
+    result = { ok: true, msg: "Connected!" };
+  }
+  return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
+}`;
+
+function SetupScreen({ onSave, current, onBack }) {
+  const [url, setUrl] = useState(current || "");
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState(null);
+  const [copied, setCopied] = useState(false);
+
+  async function testConnection() {
+    setTesting(true); setTestResult(null);
+    const r = await sheetsCall(url, "ping");
+    setTestResult(r.ok ? "success" : "error");
+    setTesting(false);
+  }
+  function copy() {
+    navigator.clipboard.writeText(APPS_SCRIPT_CODE);
+    setCopied(true); setTimeout(() => setCopied(false), 2000);
+  }
+
+  return (
+    <div style={S.setupRoot}>
+      <div style={S.setupBox}>
+        <div style={S.logoMark}><span style={{color:"#00d4ff"}}>DEBUG</span><span style={{color:"#ff6b35"}}>ARENA</span></div>
+        <div style={S.setupTitle}>Google Sheets Setup</div>
+        <p style={S.setupDesc}>Do this once before the event. Takes about 5 minutes.</p>
+
+        <div style={S.steps}>
+          {[
+            { n:"1", title:"Create a Google Sheet", body: <>Go to <a href="https://sheets.google.com" target="_blank" rel="noreferrer" style={{color:"#00d4ff"}}>sheets.google.com</a> and create a new spreadsheet. Name it <b>Debug Arena Results</b>.</> },
+            { n:"2", title:"Open Apps Script", body: <>In your sheet, click <b>Extensions → Apps Script</b>. Delete the existing code.</> },
+            { n:"3", title:"Paste the script", body: <>Copy the script below and paste it into the Apps Script editor. Click <b>Save</b>.</> },
+            { n:"4", title:"Deploy as Web App", body: <>Click <b>Deploy → New Deployment</b>. Choose type: <b>Web App</b>. Set "Who has access" to <b>Anyone</b>. Click Deploy and copy the Web App URL.</> },
+            { n:"5", title:"Paste URL below", body: <>Paste your Web App URL below, test it, then save.</> },
+          ].map(s => (
+            <div key={s.n} style={S.step}>
+              <div style={S.stepN}>{s.n}</div>
+              <div><div style={S.stepTitle}>{s.title}</div><div style={S.stepBody}>{s.body}</div></div>
+            </div>
+          ))}
+        </div>
+
+        <div style={S.scriptBox}>
+          <div style={S.scriptHdr}>
+            <span style={{fontSize:"0.7rem",color:"#3a5a7a",letterSpacing:1}}>APPS SCRIPT CODE</span>
+            <button style={S.copyBtn} onClick={copy}>{copied ? "✓ COPIED" : "COPY"}</button>
+          </div>
+          <pre style={S.scriptPre}>{APPS_SCRIPT_CODE}</pre>
+        </div>
+
+        <div style={{marginTop:20}}>
+          <label style={S.lbl}>WEB APP URL</label>
+          <input value={url} onChange={e=>setUrl(e.target.value)}
+            placeholder="https://script.google.com/macros/s/.../exec"
+            style={S.input} />
+        </div>
+        {testResult === "success" && <div style={S.okMsg}>✅ Connected successfully!</div>}
+        {testResult === "error"   && <div style={S.errMsg}>❌ Connection failed. Check the URL and deployment settings.</div>}
+        <div style={{display:"flex",gap:10,marginTop:14}}>
+          <button style={S.btnGhost2} onClick={testConnection} disabled={!url||testing}>{testing?"Testing…":"TEST CONNECTION"}</button>
+          <button style={{...S.btnPrimary2, opacity: !url||testResult!=="success"?.5:1}} disabled={!url||testResult!=="success"} onClick={()=>onSave(url)}>SAVE & CONTINUE →</button>
+        </div>
+        {onBack && <button style={{...S.btnGhost2,marginTop:10,width:"100%"}} onClick={onBack}>← BACK</button>}
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// LANDING SCREEN
+// ══════════════════════════════════════════════════════════════════════════════
+function LandingScreen({ webAppUrl, onParticipant, onCoordinator, onLeaderboard, onSetup }) {
+  const [tab, setTab] = useState("participant");
+  const [name, setName] = useState(""); const [usn, setUsn] = useState(""); const [branch, setBranch] = useState("");
+  const [coordPass, setCoordPass] = useState(""); const [err, setErr] = useState(""); const [loading, setLoading] = useState(false);
+
+  async function handleJoin() {
+    if (!name.trim()||!usn.trim()||!branch.trim()) { setErr("All fields are required."); return; }
+    if (!webAppUrl) { setErr("Platform not configured yet. Contact coordinator."); return; }
+    setLoading(true); setErr("");
+    const r = await sheetsPost(webAppUrl, "register", { name: name.trim(), usn: usn.trim().toUpperCase(), branch: branch.trim() });
+    setLoading(false);
+    if (r.error) { setErr("Could not connect to Google Sheets. Try again."); return; }
+    onParticipant({ name: name.trim(), usn: usn.trim().toUpperCase(), branch: branch.trim() });
+  }
+  function handleCoord() {
+    if (coordPass === COORDINATOR_PASS) { setErr(""); onCoordinator(); }
+    else setErr("Incorrect password.");
+  }
+
+  return (
+    <div style={S.landing}>
+      <div style={S.landingBox}>
+        <div style={S.logoMark}><span style={{color:"#00d4ff"}}>DEBUG</span><span style={{color:"#ff6b35"}}>ARENA</span></div>
+        <p style={S.landingSub}>C Language Debugging Championship</p>
+        <div style={S.tabRow}>
+          {["participant","coordinator"].map(t=>(
+            <button key={t} style={{...S.tabBtn,...(tab===t?S.tabBtnActive:{})}} onClick={()=>{setTab(t);setErr("");}}>
+              {t==="participant"?"⚡ PARTICIPANT":"🎛 COORDINATOR"}
+            </button>
+          ))}
+        </div>
+        {tab==="participant" && <>
+          <Field label="FULL NAME" value={name} onChange={setName} placeholder="e.g. Ravi Kumar" />
+          <Field label="USN" value={usn} onChange={setUsn} placeholder="e.g. 1MS21CS001" />
+          <Field label="BRANCH" value={branch} onChange={setBranch} placeholder="e.g. CSE, ECE, ME" />
+          {err && <p style={S.err}>{err}</p>}
+          <button style={S.btnPrimary} onClick={handleJoin} disabled={loading}>{loading?"Registering…":"ENTER ARENA →"}</button>
+        </>}
+        {tab==="coordinator" && <>
+          <Field label="PASSWORD" value={coordPass} onChange={setCoordPass} type="password" placeholder="Coordinator password" />
+          {err && <p style={S.err}>{err}</p>}
+          <button style={S.btnPrimary} onClick={handleCoord}>ACCESS DASHBOARD →</button>
+          <button style={S.btnGhost} onClick={onSetup}>⚙ Configure Google Sheets</button>
+        </>}
+        <button style={S.btnGhost} onClick={onLeaderboard}>📊 VIEW LIVE LEADERBOARD</button>
+      </div>
+      <div style={S.statsRow}>
+        {[["10","Challenges"],["150","Max Points"],["200+","Participants"]].map(([n,l])=>(
+          <div key={l} style={S.statBox}><div style={S.statN}>{n}</div><div style={S.statL}>{l}</div></div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CHALLENGE SCREEN
+// ══════════════════════════════════════════════════════════════════════════════
+function ChallengeScreen({ participant, webAppUrl, onLeaderboard }) {
+  const [qIdx, setQIdx] = useState(0);
+  const [solvedIds, setSolvedIds] = useState(new Set());
+  const [solvedTimes, setSolvedTimes] = useState({});
+  const [code, setCode] = useState(CHALLENGES[0].buggyCode);
+  const [output, setOutput] = useState(""); const [outputType, setOutputType] = useState("idle");
+  const [loading, setLoading] = useState(false);
+  const [feedback, setFeedback] = useState(""); const [result, setResult] = useState(null);
+  const [attempts, setAttempts] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
+  const startRef = useRef(Date.now());
+  const timerRef = useRef(null);
+  const ch = CHALLENGES[qIdx];
+  const alreadySolved = solvedIds.has(ch.id);
+const totalScore = CHALLENGES.reduce((acc, c) => {
+  return solvedIds.has(c.id) ? acc + c.points : acc;
+}, 0);
+}
