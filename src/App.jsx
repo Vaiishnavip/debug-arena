@@ -410,8 +410,16 @@ function ChallengeScreen({ participant, webAppUrl, onLeaderboard }) {
       setOutputType("ok"); setResult("correct");
       clearInterval(timerRef.current);
       const ms = Date.now() - startRef.current;
-      setSolvedIds(prev => new Set([...prev, ch.id]));
-      setSolvedTimes(prev => ({ ...prev, [ch.id]: ms }));
+      const newSolvedIds = new Set([...solvedIds, ch.id]);
+      const newSolvedTimes = { ...solvedTimes, [ch.id]: ms };
+setSolvedIds(newSolvedIds);
+setSolvedTimes(newSolvedTimes);
+
+// Save progress to localStorage
+localStorage.setItem(key, JSON.stringify({
+  solvedIds: [...newSolvedIds],
+  solvedTimes: newSolvedTimes
+}));
       await sheetsPost(webAppUrl, "submit", {
         usn: participant.usn, name: participant.name, branch: participant.branch,
         qId: ch.id, qTitle: ch.title,
