@@ -134,12 +134,12 @@ async function sheetsPost(webAppUrl, action, payload = {}) {
 
 // ─── AI VALIDATION ───────────────────────────────────────────────────────────
 async function validateWithAI(challenge, submittedCode) {
-  const prompt = `You are a strict C code evaluator for a debugging competition.
-
+  const prompt = `
 ORIGINAL BUGGY CODE:
 \`\`\`c
 ${challenge.buggyCode}
 \`\`\`
+
 BUG: ${challenge.explanation}
 EXPECTED OUTPUT: ${challenge.expectedOutput}
 
@@ -148,24 +148,73 @@ PARTICIPANT'S FIX:
 ${submittedCode}
 \`\`\`
 
-Does this fix correctly resolve the bug? Be lenient on style, strict on logic.
-Reply ONLY with JSON, no markdown:
-{"correct":true/false,"feedback":"one sentence","simulatedOutput":"what it would print"}`;
+Return ONLY valid JSON (no markdown, no extra text):
+{"correct":true/false,"feedback":"one sentence","simulatedOutput":"what it would print"}
+`;
 
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": process.env.ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01"
+    },
     body: JSON.stringify({
-      model: "claude-sonnet-4-20250514", max_tokens: 300,
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 300,
+      system: "You are a strict C debugging evaluator. You must respond ONLY in valid JSON.",
       messages: [{ role: "user", content: prompt }]
     })
   });
+
   const data = await res.json();
-  const text = (data.content || []).map(b => b.text || "").join("");
-  try { return JSON.parse(text.replace(/```json|```/g, "").trim()); }
-  catch { return { correct: false, feedback: "Evaluation error. Try again.", simulatedOutput: "—" }; }
+
+  const text = (data.content || [])
+    .map(block => block.text || "")
+    .join("")
+    .trim();
+
+  return safeParseJSON(text);
 }
 
+/**
+ * 🔥 Ultra-safe JSON parser for LLM outputs
+ */
+function safeParseJSON(text) {
+  if (!text) {
+    return fallback();
+  }
+
+  // 1. Direct parse attempt
+  try {
+    return JSON.parse(text);
+  } catch (_) {}
+
+  // 2. Remove code fences if present
+  const cleaned = text.replace(/```json|```/g, "").trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch (_) {}
+
+  // 3. Extract JSON object using regex (most reliable fallback)
+  const match = cleaned.match(/\{[\s\S]*\}/);
+  if (match) {
+    try {
+      return JSON.parse(match[0]);
+    } catch (_) {}
+  }
+
+  // 4. Final fallback
+  return fallback();
+}
+
+function fallback() {
+  return {
+    correct: false,
+    feedback: "Evaluation failed due to invalid model output.",
+    simulatedOutput: "—"
+  };
+}
 // ══════════════════════════════════════════════════════════════════════════════
 // MAIN APP
 // ══════════════════════════════════════════════════════════════════════════════
