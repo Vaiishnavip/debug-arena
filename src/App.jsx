@@ -316,7 +316,16 @@ function LandingScreen({ webAppUrl, onParticipant, onCoordinator, onLeaderboard,
     const r = await sheetsPost(webAppUrl, "register", { name: name.trim(), usn: usn.trim().toUpperCase(), branch: branch.trim() });
     setLoading(false);
     if (r.error) { setErr("Could not connect to Google Sheets. Try again."); return; }
-    onParticipant({ name: name.trim(), usn: usn.trim().toUpperCase(), branch: branch.trim() });
+    
+    // Save progress to localStorage
+    const key = `debugarena-progress-${usn.trim().toUpperCase()}`;
+    const saved = JSON.parse(localStorage.getItem(key) || "{}");
+    onParticipant({ 
+      name: name.trim(), 
+      usn: usn.trim().toUpperCase(), 
+      branch: branch.trim(),
+      savedProgress: saved
+    });
   }
   function handleCoord() {
     if (coordPass === COORDINATOR_PASS) { setErr(""); onCoordinator(); }
@@ -364,8 +373,10 @@ function LandingScreen({ webAppUrl, onParticipant, onCoordinator, onLeaderboard,
 // ══════════════════════════════════════════════════════════════════════════════
 function ChallengeScreen({ participant, webAppUrl, onLeaderboard }) {
   const [qIdx, setQIdx] = useState(0);
-  const [solvedIds, setSolvedIds] = useState(new Set());
-  const [solvedTimes, setSolvedTimes] = useState({});
+  const key = `debugarena-progress-${participant.usn}`;
+  const saved = participant.savedProgress || {};
+  const [solvedIds, setSolvedIds] = useState(new Set(saved.solvedIds || []));
+  const [solvedTimes, setSolvedTimes] = useState(saved.solvedTimes || {});
   const [code, setCode] = useState(CHALLENGES[0].buggyCode);
   const [output, setOutput] = useState(""); const [outputType, setOutputType] = useState("idle");
   const [loading, setLoading] = useState(false);
