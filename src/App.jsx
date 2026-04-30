@@ -170,8 +170,9 @@ async function validateWithAI(challenge, submittedCode) {
 export default function App() {
   const [screen, setScreen] = useState("landing");
   const [participant, setParticipant] = useState(null);
-  const [webAppUrl, setWebAppUrl] = useState(() => localStorage.getItem(CONFIG_KEY) || DEFAULT_SHEETS_URL);
-  const [configSet, setConfigSet] = useState(() => !!(localStorage.getItem(CONFIG_KEY) || DEFAULT_SHEETS_URL));
+  // REPLACE lines 173-174 with:
+const [webAppUrl, setWebAppUrl] = useState(() => localStorage.getItem(CONFIG_KEY) || DEFAULT_SHEETS_URL);
+const [configSet, setConfigSet] = useState(() => !!(localStorage.getItem(CONFIG_KEY) || DEFAULT_SHEETS_URL));
   function saveConfig(url) {
     localStorage.setItem(CONFIG_KEY, url);
     setWebAppUrl(url); setConfigSet(true);
