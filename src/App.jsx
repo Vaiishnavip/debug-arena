@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 // ─────────────────────────────────────────────────────────────────────────────
 // CONFIGURATION — Coordinator fills this once before the event
 // ─────────────────────────────────────────────────────────────────────────────
-const DEFAULT_SHEETS_URL = "https://script.google.com/macros/s/AKfycbz_TDxi9Py_PXc8JR_27pUsO2yQNkIP0lg_IvGHqHNs5DUg9Vxm3dwbFDanBfnh-gBD/exec";
+const CONFIG_KEY = "debugarena-sheets-url";
 
 // ─── C DEBUGGING CHALLENGES ──────────────────────────────────────────────────
 const CHALLENGES = [
