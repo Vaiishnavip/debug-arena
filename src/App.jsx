@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 // CONFIGURATION — Coordinator fills this once before the event
 // ─────────────────────────────────────────────────────────────────────────────
 const CONFIG_KEY = "debugarena-sheets-url";
+const DEFAULT_SHEETS_URL = "https://script.google.com/macros/s/AKfycbz_TDxi9Py_PXc8JR_27pUsO2yQNkIP0lg_IvGHqHNs5DUg9Vxm3dwbFDanBfnh-gBD/exec";
 
 // ─── C DEBUGGING CHALLENGES ──────────────────────────────────────────────────
 const CHALLENGES = [
@@ -104,9 +105,6 @@ function scoreColor(score) {
 }
 
 // ─── GOOGLE SHEETS API ───────────────────────────────────────────────────────
-// Uses a Google Apps Script Web App as a middleware
-// The coordinator sets up once and pastes the Web App URL
-
 async function sheetsCall(webAppUrl, action, payload = {}) {
   try {
     const url = `${webAppUrl}?action=${action}&payload=${encodeURIComponent(JSON.stringify(payload))}`;
@@ -135,9 +133,7 @@ async function sheetsPost(webAppUrl, action, payload = {}) {
 // ─── AI VALIDATION ───────────────────────────────────────────────────────────
 async function validateWithAI(challenge, submittedCode) {
   const normalize = s => s.replace(/\s+/g, " ").trim();
-  const userCode = normalize(submittedCode);
 
-  // Check if the known fix is present
   const fixes = {
     1: "i < 5",
     2: "return sum;",
@@ -164,15 +160,16 @@ async function validateWithAI(challenge, submittedCode) {
     simulatedOutput: isCorrect ? challenge.expectedOutput : "Incorrect output"
   };
 }
+
 // ══════════════════════════════════════════════════════════════════════════════
 // MAIN APP
 // ══════════════════════════════════════════════════════════════════════════════
 export default function App() {
   const [screen, setScreen] = useState("landing");
   const [participant, setParticipant] = useState(null);
-  // REPLACE lines 173-174 with:
-const [webAppUrl, setWebAppUrl] = useState(() => localStorage.getItem(CONFIG_KEY) || DEFAULT_SHEETS_URL);
-const [configSet, setConfigSet] = useState(() => !!(localStorage.getItem(CONFIG_KEY) || DEFAULT_SHEETS_URL));
+  const [webAppUrl, setWebAppUrl] = useState(() => localStorage.getItem(CONFIG_KEY) || DEFAULT_SHEETS_URL);
+  const [configSet, setConfigSet] = useState(() => !!(localStorage.getItem(CONFIG_KEY) || DEFAULT_SHEETS_URL));
+
   function saveConfig(url) {
     localStorage.setItem(CONFIG_KEY, url);
     setWebAppUrl(url); setConfigSet(true);
@@ -197,7 +194,7 @@ const [configSet, setConfigSet] = useState(() => !!(localStorage.getItem(CONFIG_
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// SETUP SCREEN — coordinator configures once
+// SETUP SCREEN
 // ══════════════════════════════════════════════════════════════════════════════
 const APPS_SCRIPT_CODE = `// Paste this entire script into Google Apps Script
 // (Extensions > Apps Script in your Google Sheet)
@@ -316,16 +313,9 @@ function LandingScreen({ webAppUrl, onParticipant, onCoordinator, onLeaderboard,
     const r = await sheetsPost(webAppUrl, "register", { name: name.trim(), usn: usn.trim().toUpperCase(), branch: branch.trim() });
     setLoading(false);
     if (r.error) { setErr("Could not connect to Google Sheets. Try again."); return; }
-    
-    // Save progress to localStorage
     const key = `debugarena-progress-${usn.trim().toUpperCase()}`;
     const saved = JSON.parse(localStorage.getItem(key) || "{}");
-    onParticipant({ 
-      name: name.trim(), 
-      usn: usn.trim().toUpperCase(), 
-      branch: branch.trim(),
-      savedProgress: saved
-    });
+    onParticipant({ name: name.trim(), usn: usn.trim().toUpperCase(), branch: branch.trim(), savedProgress: saved });
   }
   function handleCoord() {
     if (coordPass === COORDINATOR_PASS) { setErr(""); onCoordinator(); }
@@ -401,7 +391,7 @@ function ChallengeScreen({ participant, webAppUrl, onLeaderboard }) {
 
   async function handleRun() {
     if (loading || alreadySolved) return;
-    setLoading(true); setOutput("Claude AI is evaluating your fix…"); setOutputType("idle");
+    setLoading(true); setOutput("Evaluating your fix…"); setOutputType("idle");
     setFeedback(""); setResult(null);
     const att = attempts + 1; setAttempts(att);
     const r = await validateWithAI(ch, code);
@@ -412,14 +402,9 @@ function ChallengeScreen({ participant, webAppUrl, onLeaderboard }) {
       const ms = Date.now() - startRef.current;
       const newSolvedIds = new Set([...solvedIds, ch.id]);
       const newSolvedTimes = { ...solvedTimes, [ch.id]: ms };
-setSolvedIds(newSolvedIds);
-setSolvedTimes(newSolvedTimes);
-
-// Save progress to localStorage
-localStorage.setItem(key, JSON.stringify({
-  solvedIds: [...newSolvedIds],
-  solvedTimes: newSolvedTimes
-}));
+      setSolvedIds(newSolvedIds);
+      setSolvedTimes(newSolvedTimes);
+      localStorage.setItem(key, JSON.stringify({ solvedIds: [...newSolvedIds], solvedTimes: newSolvedTimes }));
       await sheetsPost(webAppUrl, "submit", {
         usn: participant.usn, name: participant.name, branch: participant.branch,
         qId: ch.id, qTitle: ch.title,
@@ -455,7 +440,6 @@ localStorage.setItem(key, JSON.stringify({
       </div>
 
       <div style={S.challBody}>
-        {/* Sidebar */}
         <div style={S.sidebar}>
           <div style={S.sideTitle}>CHALLENGES</div>
           {CHALLENGES.map((c,i)=>{
@@ -474,7 +458,6 @@ localStorage.setItem(key, JSON.stringify({
           </div>
         </div>
 
-        {/* Main */}
         <div style={S.mainPanel}>
           <div style={S.qHeader}>
             <div>
@@ -561,8 +544,7 @@ function LeaderboardScreen({ webAppUrl, onBack }) {
     setLoading(true);
     const r = await sheetsCall(webAppUrl, "leaderboard");
     if (r.participants && r.submissions) {
-      const lb = buildLb(r.participants, r.submissions);
-      setData(lb);
+      setData(buildLb(r.participants, r.submissions));
     }
     setLoading(false);
     setLastRefresh(new Date().toLocaleTimeString());
@@ -571,8 +553,6 @@ function LeaderboardScreen({ webAppUrl, onBack }) {
   useEffect(() => { load(); const iv = setInterval(load, 20000); return ()=>clearInterval(iv); }, []);
 
   function buildLb(parts, subs) {
-    // parts: [Name, USN, Branch, JoinedAt]
-    // subs:  [USN, Name, Branch, QID, QTitle, TimeTakenMs, TimeFmt, Attempts, Correct, SubmittedAt]
     return parts.map(p => {
       const usn = p[1];
       const correct = subs.filter(s => s[0]===usn && s[8]==="YES");
@@ -693,7 +673,6 @@ function CoordinatorScreen({ webAppUrl, onBack }) {
         </div>
       </div>
 
-      {/* Stats */}
       <div style={S.statsBar}>
         {[[raw.participants.length,"Registered","#00d4ff"],[activeCount,"Active","#39ff14"],
           [totalSolves,"Submissions","#ffcc00"],[lb[0]?.name||"—","Leader","#ffd700"]].map(([n,l,c])=>(
@@ -704,7 +683,6 @@ function CoordinatorScreen({ webAppUrl, onBack }) {
         ))}
       </div>
 
-      {/* Tabs */}
       <div style={S.coordTabs}>
         {["leaderboard","participants","per-question"].map(t=>(
           <button key={t} style={{...S.tabBtn2,...(tab===t?S.tabBtn2Active:{})}} onClick={()=>setTab(t)}>
@@ -716,7 +694,6 @@ function CoordinatorScreen({ webAppUrl, onBack }) {
       <div style={S.coordContent}>
         {loading && <div style={{color:"#3a5a7a",padding:40,textAlign:"center"}}>Loading from Google Sheets…</div>}
 
-        {/* LEADERBOARD TAB */}
         {!loading && tab==="leaderboard" && (
           <div style={{overflowX:"auto"}}>
             <table style={S.table}>
@@ -746,7 +723,6 @@ function CoordinatorScreen({ webAppUrl, onBack }) {
           </div>
         )}
 
-        {/* PARTICIPANTS TAB */}
         {!loading && tab==="participants" && (
           <div>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
@@ -777,7 +753,6 @@ function CoordinatorScreen({ webAppUrl, onBack }) {
           </div>
         )}
 
-        {/* PER-QUESTION TAB */}
         {!loading && tab==="per-question" && (
           <div>
             <div style={S.coordSectionTitle}>📋 QUESTION ANALYTICS</div>
@@ -842,8 +817,6 @@ const S = {
   app:{minHeight:"100vh",background:"#040810",color:"#c8e0f4",fontFamily:"'Rajdhani',sans-serif",backgroundImage:"repeating-linear-gradient(0deg,transparent,transparent 39px,#00d4ff05 39px,#00d4ff05 40px),repeating-linear-gradient(90deg,transparent,transparent 39px,#00d4ff05 39px,#00d4ff05 40px)"},
   setupBanner:{background:"#ffcc0011",borderBottom:"1px solid #ffcc0044",padding:"8px 20px",fontSize:"0.82rem",color:"#ffcc00",textAlign:"center"},
   inlineBtnLink:{background:"none",border:"none",color:"#00d4ff",cursor:"pointer",fontFamily:"'Rajdhani',sans-serif",fontSize:"0.82rem",textDecoration:"underline"},
-
-  // SETUP
   setupRoot:{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:24},
   setupBox:{width:"100%",maxWidth:680,background:"#080f1a",border:"1px solid #0d2040",padding:"36px 32px"},
   setupTitle:{fontFamily:"'Orbitron',monospace",fontSize:"1.1rem",fontWeight:700,color:"#00d4ff",textAlign:"center",marginTop:8,marginBottom:4},
@@ -863,8 +836,6 @@ const S = {
   btnPrimary2:{flex:1,padding:"10px 20px",background:"#00d4ff",color:"#000",border:"none",cursor:"pointer",fontFamily:"'Orbitron',monospace",fontSize:"0.78rem",fontWeight:700,letterSpacing:1,borderRadius:3},
   lbl:{display:"block",fontSize:"0.68rem",letterSpacing:1.5,color:"#3a5a7a",marginBottom:4,textTransform:"uppercase"},
   input:{width:"100%",padding:"10px 12px",background:"#040810",border:"1px solid #0d2040",color:"#c8e0f4",fontFamily:"'Share Tech Mono',monospace",fontSize:"0.85rem",outline:"none",borderRadius:3},
-
-  // LANDING
   landing:{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:32,gap:24},
   landingBox:{width:"100%",maxWidth:480,background:"#080f1a",border:"1px solid #0d2040",padding:"36px 32px",boxShadow:"0 0 60px #00d4ff0a"},
   logoMark:{fontFamily:"'Orbitron',monospace",fontSize:"2rem",fontWeight:900,textAlign:"center",marginBottom:4,letterSpacing:3,textShadow:"0 0 30px #00d4ff33"},
@@ -879,8 +850,6 @@ const S = {
   statBox:{padding:"14px 24px",textAlign:"center",borderRight:"1px solid #0d2040"},
   statN:{fontFamily:"'Orbitron',monospace",fontSize:"1.2rem",color:"#00d4ff",fontWeight:900},
   statL:{fontSize:"0.62rem",color:"#3a5a7a",letterSpacing:1,marginTop:2},
-
-  // CHALLENGE
   challRoot:{display:"flex",flexDirection:"column",minHeight:"100vh"},
   challHeader:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 22px",borderBottom:"1px solid #0d2040",background:"#040810ee",position:"sticky",top:0,zIndex:100,gap:10,flexWrap:"wrap"},
   chip:{padding:"3px 10px",border:"1px solid #0d2040",borderRadius:2,fontSize:"0.72rem",fontFamily:"'Share Tech Mono',monospace",color:"#a8d8f0"},
@@ -919,8 +888,6 @@ const S = {
   btnAction:{padding:"10px 18px",background:"#080f1a",border:"1px solid #0d2040",color:"#a8d8f0",cursor:"pointer",fontFamily:"'Orbitron',monospace",fontSize:"0.68rem",borderRadius:3},
   btnRun:{flex:1,padding:"11px",background:"#00d4ff",color:"#000",border:"none",cursor:"pointer",fontFamily:"'Orbitron',monospace",fontSize:"0.78rem",fontWeight:700,letterSpacing:2,borderRadius:3},
   btnSm:{padding:"6px 14px",background:"#00d4ff22",border:"1px solid #00d4ff",color:"#00d4ff",cursor:"pointer",fontFamily:"'Orbitron',monospace",fontSize:"0.68rem",borderRadius:3,letterSpacing:1},
-
-  // LEADERBOARD
   lbRoot:{minHeight:"100vh",display:"flex",flexDirection:"column"},
   lbHeader:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 26px",borderBottom:"1px solid #0d2040",background:"#040810ee",gap:10,flexWrap:"wrap"},
   lbContainer:{maxWidth:820,margin:"0 auto",padding:"24px 18px",width:"100%"},
@@ -930,8 +897,6 @@ const S = {
   rank:{fontFamily:"'Orbitron',monospace",fontWeight:900,fontSize:"1.05rem",minWidth:34,textAlign:"center"},
   lbName:{flex:1},
   lbStats:{display:"flex",gap:18,alignItems:"center"},
-
-  // COORDINATOR
   coordRoot:{minHeight:"100vh",display:"flex",flexDirection:"column"},
   statsBar:{display:"flex",borderBottom:"1px solid #0d2040",background:"#060c14",flexWrap:"wrap"},
   coordTabs:{display:"flex",borderBottom:"1px solid #0d2040",background:"#040810"},
