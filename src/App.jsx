@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 // ─────────────────────────────────────────────────────────────────────────────
 // CONFIGURATION — Coordinator fills this once before the event
 // ─────────────────────────────────────────────────────────────────────────────
-const CONFIG_KEY = "debugarena-gsheet-config";
+const DEFAULT_SHEETS_URL = "https://script.google.com/macros/s/AKfycbz_TDxi9Py_PXc8JR_27pUsO2yQNkIP0lg_IvGHqHNs5DUg9Vxm3dwbFDanBfnh-gBD/exec";
 
 // ─── C DEBUGGING CHALLENGES ──────────────────────────────────────────────────
 const CHALLENGES = [
@@ -170,9 +170,8 @@ async function validateWithAI(challenge, submittedCode) {
 export default function App() {
   const [screen, setScreen] = useState("landing");
   const [participant, setParticipant] = useState(null);
-  const [webAppUrl, setWebAppUrl] = useState(() => localStorage.getItem(CONFIG_KEY) || "");
-  const [configSet, setConfigSet] = useState(() => !!localStorage.getItem(CONFIG_KEY));
-
+  const [webAppUrl, setWebAppUrl] = useState(() => localStorage.getItem(CONFIG_KEY) || DEFAULT_SHEETS_URL);
+const [configSet, setConfigSet] = useState(() => !!(localStorage.getItem(CONFIG_KEY) || DEFAULT_SHEETS_URL));
   function saveConfig(url) {
     localStorage.setItem(CONFIG_KEY, url);
     setWebAppUrl(url); setConfigSet(true);
