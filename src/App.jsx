@@ -213,10 +213,9 @@ export default function App() {
   return (
     <div style={S.app}>
       <style>{CSS}</style>
-      {screen === "landing"     && <LandingScreen onParticipant={p => { setParticipant(p); setScreen("challenge"); }} onCoordinator={() => setScreen("coordinator")} onLeaderboard={() => setScreen("leaderboard")} />}
-      {screen === "challenge"   && <ChallengeScreen participant={participant} onLeaderboard={() => setScreen("leaderboard")} />}
-      {screen === "leaderboard" && <LeaderboardScreen onBack={() => setScreen(participant ? "challenge" : "landing")} />}
-      {screen === "coordinator" && <CoordinatorScreen onBack={() => setScreen("landing")} />}
+      {screen === "landing"     && <LandingScreen onParticipant={p => { setParticipant(p); setScreen("challenge"); }} onCoordinator={() => setScreen("coordinator")} />}
+      {screen === "challenge"   && <ChallengeScreen participant={participant} />}
+      {screen === "coordinator" && <CoordinatorScreen onBack={() => setScreen("landing")} />} 
     </div>
   );
 }
@@ -224,7 +223,7 @@ export default function App() {
 // ══════════════════════════════════════════════════════════════════════════════
 // LANDING SCREEN
 // ══════════════════════════════════════════════════════════════════════════════
-function LandingScreen({ onParticipant, onCoordinator, onLeaderboard }) {
+function LandingScreen({ onParticipant, onCoordinator}) {
   const [tab, setTab] = useState("participant");
   const [name, setName] = useState(""); const [usn, setUsn] = useState(""); const [branch, setBranch] = useState("");
   const [coordPass, setCoordPass] = useState(""); const [err, setErr] = useState(""); const [loading, setLoading] = useState(false);
@@ -275,7 +274,7 @@ function LandingScreen({ onParticipant, onCoordinator, onLeaderboard }) {
           {err && <p style={S.err}>{err}</p>}
           <button style={S.btnPrimary} onClick={handleCoord}>ACCESS DASHBOARD →</button>
         </>}
-        <button style={S.btnGhost} onClick={onLeaderboard}>📊 VIEW LIVE LEADERBOARD</button>
+       
       </div>
       <div style={S.statsRow}>
         {[["10","Challenges"],["150","Max Points"],["300+","Participants"]].map(([n,l])=>(
@@ -289,7 +288,7 @@ function LandingScreen({ onParticipant, onCoordinator, onLeaderboard }) {
 // ══════════════════════════════════════════════════════════════════════════════
 // CHALLENGE SCREEN
 // ══════════════════════════════════════════════════════════════════════════════
-function ChallengeScreen({ participant, onLeaderboard }) {
+function ChallengeScreen({ participant}) {
   const [qIdx, setQIdx] = useState(0);
   const key = `debugarena-progress-${participant.usn}`;
   const saved = participant.savedProgress || {};
@@ -366,7 +365,7 @@ function ChallengeScreen({ participant, onLeaderboard }) {
         </div>
         <div style={{display:"flex",gap:10,alignItems:"center"}}>
           <div style={S.scorePill}>🏆 {totalScore} pts</div>
-          <button style={S.btnSm} onClick={onLeaderboard}>LEADERBOARD</button>
+          
         </div>
       </div>
 
