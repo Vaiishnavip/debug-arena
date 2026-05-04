@@ -1,10 +1,78 @@
 import { useState, useEffect, useRef } from "react";
+import { initializeApp } from "firebase/app";
+import { getDatabase, ref, set, get, push, onValue } from "firebase/database";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CONFIGURATION — Coordinator fills this once before the event
-// ─────────────────────────────────────────────────────────────────────────────
-const CONFIG_KEY = "debugarena-sheets-url";
-const DEFAULT_SHEETS_URL = "https://script.google.com/macros/s/AKfycbz_TDxi9Py_PXc8JR_27pUsO2yQNkIP0lg_IvGHqHNs5DUg9Vxm3dwbFDanBfnh-gBD/exec";
+// ─── FIREBASE CONFIGURATION ───────────────────────────────────────────────────
+const firebaseConfig = {
+  apiKey: "AIzaSyC1dFwu6mufnv3yUmCJoitDi_5r8qOAd-Q",
+  authDomain: "debug-arena-d2f05.firebaseapp.com",
+  databaseURL: "https://debug-arena-d2f05-default-rtdb.firebaseio.com",
+  projectId: "debug-arena-d2f05",
+  storageBucket: "debug-arena-d2f05.firebasestorage.app",
+  messagingSenderId: "456830431132",
+  appId: "1:456830431132:web:4a43c3152b18ab07942259"
+};
+
+const firebaseApp = initializeApp(firebaseConfig);
+const db = getDatabase(firebaseApp);
+
+// ─── FIREBASE HELPERS ─────────────────────────────────────────────────────────
+async function fbRegister(participant) {
+  try {
+    const usnKey = participant.usn.replace(/\./g, "_");
+    const existingRef = ref(db, `participants/${usnKey}`);
+    const snapshot = await get(existingRef);
+    if (!snapshot.exists()) {
+      await set(existingRef, {
+        name: participant.name,
+        usn: participant.usn,
+        branch: participant.branch,
+        joinedAt: new Date().toISOString()
+      });
+    }
+    return { ok: true };
+  } catch (e) {
+    console.error("Register error:", e);
+    return { error: e.message };
+  }
+}
+
+async function fbSubmit(data) {
+  try {
+    const usnKey = data.usn.replace(/\./g, "_");
+    const submissionsRef = ref(db, `submissions/${usnKey}`);
+    await push(submissionsRef, {
+      usn: data.usn,
+      name: data.name,
+      branch: data.branch,
+      qId: data.qId,
+      qTitle: data.qTitle,
+      timeTakenMs: data.timeTakenMs,
+      timeFmt: data.timeFmt,
+      attempts: data.attempts,
+      correct: data.correct,
+      submittedAt: new Date().toISOString()
+    });
+    return { ok: true };
+  } catch (e) {
+    console.error("Submit error:", e);
+    return { error: e.message };
+  }
+}
+
+async function fbGetLeaderboard() {
+  try {
+    const partSnap = await get(ref(db, "participants"));
+    const subSnap = await get(ref(db, "submissions"));
+    const participants = partSnap.exists() ? Object.values(partSnap.val()) : [];
+    const submissionsRaw = subSnap.exists() ? subSnap.val() : {};
+    const submissions = Object.values(submissionsRaw).flatMap(s => Object.values(s));
+    return { participants, submissions };
+  } catch (e) {
+    console.error("Leaderboard error:", e);
+    return { participants: [], submissions: [] };
+  }
+}
 
 // ─── C DEBUGGING CHALLENGES ──────────────────────────────────────────────────
 const CHALLENGES = [
@@ -104,32 +172,6 @@ function scoreColor(score) {
   return score >= 80 ? "#39ff14" : score >= 40 ? "#ffcc00" : "#ff6b35";
 }
 
-// ─── GOOGLE SHEETS API ───────────────────────────────────────────────────────
-async function sheetsCall(webAppUrl, action, payload = {}) {
-  try {
-    const url = `${webAppUrl}?action=${action}&payload=${encodeURIComponent(JSON.stringify(payload))}`;
-    const res = await fetch(url);
-    const text = await res.text();
-    return JSON.parse(text);
-  } catch (e) {
-    console.error("Sheets error:", e);
-    return { error: e.message };
-  }
-}
-
-async function sheetsPost(webAppUrl, action, payload = {}) {
-  try {
-    const res = await fetch(webAppUrl, {
-      method: "POST",
-      body: JSON.stringify({ action, ...payload }),
-    });
-    const text = await res.text();
-    return JSON.parse(text);
-  } catch (e) {
-    return { error: e.message };
-  }
-}
-
 // ─── AI VALIDATION ───────────────────────────────────────────────────────────
 async function validateWithAI(challenge, submittedCode) {
   const normalize = s => s.replace(/\s+/g, " ").trim();
@@ -167,133 +209,14 @@ async function validateWithAI(challenge, submittedCode) {
 export default function App() {
   const [screen, setScreen] = useState("landing");
   const [participant, setParticipant] = useState(null);
-  const [webAppUrl, setWebAppUrl] = useState(() => localStorage.getItem(CONFIG_KEY) || DEFAULT_SHEETS_URL);
-  const [configSet, setConfigSet] = useState(() => !!(localStorage.getItem(CONFIG_KEY) || DEFAULT_SHEETS_URL));
-
-  function saveConfig(url) {
-    localStorage.setItem(CONFIG_KEY, url);
-    setWebAppUrl(url); setConfigSet(true);
-  }
 
   return (
     <div style={S.app}>
       <style>{CSS}</style>
-      {!configSet && screen !== "setup" && (
-        <div style={S.setupBanner}>
-          ⚠️ Google Sheets not configured.&nbsp;
-          <button style={S.inlineBtnLink} onClick={() => setScreen("setup")}>Configure Now →</button>
-        </div>
-      )}
-      {screen === "setup"       && <SetupScreen onSave={saveConfig} current={webAppUrl} onBack={() => setScreen("landing")} />}
-      {screen === "landing"     && <LandingScreen webAppUrl={webAppUrl} onParticipant={p => { setParticipant(p); setScreen("challenge"); }} onCoordinator={() => setScreen("coordinator")} onLeaderboard={() => setScreen("leaderboard")} onSetup={() => setScreen("setup")} />}
-      {screen === "challenge"   && <ChallengeScreen participant={participant} webAppUrl={webAppUrl} onLeaderboard={() => setScreen("leaderboard")} />}
-      {screen === "leaderboard" && <LeaderboardScreen webAppUrl={webAppUrl} onBack={() => setScreen(participant ? "challenge" : "landing")} />}
-      {screen === "coordinator" && <CoordinatorScreen webAppUrl={webAppUrl} onBack={() => setScreen("landing")} />}
-    </div>
-  );
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// SETUP SCREEN
-// ══════════════════════════════════════════════════════════════════════════════
-const APPS_SCRIPT_CODE = `// Paste this entire script into Google Apps Script
-// (Extensions > Apps Script in your Google Sheet)
-
-function doGet(e) {
-  return handleRequest(e.parameter.action, JSON.parse(decodeURIComponent(e.parameter.payload || "{}")));
-}
-function doPost(e) {
-  const body = JSON.parse(e.postData.contents);
-  return handleRequest(body.action, body);
-}
-function handleRequest(action, data) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let result = {};
-  if (action === "register") {
-    const sh = ss.getSheetByName("Participants") || ss.insertSheet("Participants");
-    if (sh.getLastRow() === 0) sh.appendRow(["Name","USN","Branch","JoinedAt"]);
-    const rows = sh.getDataRange().getValues();
-    const exists = rows.some(r => r[1] === data.usn);
-    if (!exists) sh.appendRow([data.name, data.usn, data.branch, new Date().toISOString()]);
-    result = { ok: true };
-  } else if (action === "submit") {
-    const sh = ss.getSheetByName("Submissions") || ss.insertSheet("Submissions");
-    if (sh.getLastRow() === 0) sh.appendRow(["USN","Name","Branch","QuestionID","QuestionTitle","TimeTakenMs","TimeTakenFormatted","Attempts","Correct","SubmittedAt"]);
-    sh.appendRow([data.usn, data.name, data.branch, data.qId, data.qTitle, data.timeTakenMs, data.timeFmt, data.attempts, data.correct ? "YES" : "NO", new Date().toISOString()]);
-    result = { ok: true };
-  } else if (action === "leaderboard") {
-    const pSh = ss.getSheetByName("Participants");
-    const sSh = ss.getSheetByName("Submissions");
-    const participants = pSh ? pSh.getDataRange().getValues().slice(1) : [];
-    const submissions  = sSh ? sSh.getDataRange().getValues().slice(1) : [];
-    result = { participants, submissions };
-  } else if (action === "ping") {
-    result = { ok: true, msg: "Connected!" };
-  }
-  return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
-}`;
-
-function SetupScreen({ onSave, current, onBack }) {
-  const [url, setUrl] = useState(current || "");
-  const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState(null);
-  const [copied, setCopied] = useState(false);
-
-  async function testConnection() {
-    setTesting(true); setTestResult(null);
-    const r = await sheetsCall(url, "ping");
-    setTestResult(r.ok ? "success" : "error");
-    setTesting(false);
-  }
-  function copy() {
-    navigator.clipboard.writeText(APPS_SCRIPT_CODE);
-    setCopied(true); setTimeout(() => setCopied(false), 2000);
-  }
-
-  return (
-    <div style={S.setupRoot}>
-      <div style={S.setupBox}>
-        <div style={S.logoMark}><span style={{color:"#00d4ff"}}>DEBUG</span><span style={{color:"#ff6b35"}}>ARENA</span></div>
-        <div style={S.setupTitle}>Google Sheets Setup</div>
-        <p style={S.setupDesc}>Do this once before the event. Takes about 5 minutes.</p>
-
-        <div style={S.steps}>
-          {[
-            { n:"1", title:"Create a Google Sheet", body: <>Go to <a href="https://sheets.google.com" target="_blank" rel="noreferrer" style={{color:"#00d4ff"}}>sheets.google.com</a> and create a new spreadsheet. Name it <b>Debug Arena Results</b>.</> },
-            { n:"2", title:"Open Apps Script", body: <>In your sheet, click <b>Extensions → Apps Script</b>. Delete the existing code.</> },
-            { n:"3", title:"Paste the script", body: <>Copy the script below and paste it into the Apps Script editor. Click <b>Save</b>.</> },
-            { n:"4", title:"Deploy as Web App", body: <>Click <b>Deploy → New Deployment</b>. Choose type: <b>Web App</b>. Set "Who has access" to <b>Anyone</b>. Click Deploy and copy the Web App URL.</> },
-            { n:"5", title:"Paste URL below", body: <>Paste your Web App URL below, test it, then save.</> },
-          ].map(s => (
-            <div key={s.n} style={S.step}>
-              <div style={S.stepN}>{s.n}</div>
-              <div><div style={S.stepTitle}>{s.title}</div><div style={S.stepBody}>{s.body}</div></div>
-            </div>
-          ))}
-        </div>
-
-        <div style={S.scriptBox}>
-          <div style={S.scriptHdr}>
-            <span style={{fontSize:"0.7rem",color:"#3a5a7a",letterSpacing:1}}>APPS SCRIPT CODE</span>
-            <button style={S.copyBtn} onClick={copy}>{copied ? "✓ COPIED" : "COPY"}</button>
-          </div>
-          <pre style={S.scriptPre}>{APPS_SCRIPT_CODE}</pre>
-        </div>
-
-        <div style={{marginTop:20}}>
-          <label style={S.lbl}>WEB APP URL</label>
-          <input value={url} onChange={e=>setUrl(e.target.value)}
-            placeholder="https://script.google.com/macros/s/.../exec"
-            style={S.input} />
-        </div>
-        {testResult === "success" && <div style={S.okMsg}>✅ Connected successfully!</div>}
-        {testResult === "error"   && <div style={S.errMsg}>❌ Connection failed. Check the URL and deployment settings.</div>}
-        <div style={{display:"flex",gap:10,marginTop:14}}>
-          <button style={S.btnGhost2} onClick={testConnection} disabled={!url||testing}>{testing?"Testing…":"TEST CONNECTION"}</button>
-          <button style={{...S.btnPrimary2, opacity: !url||testResult!=="success"?.5:1}} disabled={!url||testResult!=="success"} onClick={()=>onSave(url)}>SAVE & CONTINUE →</button>
-        </div>
-        {onBack && <button style={{...S.btnGhost2,marginTop:10,width:"100%"}} onClick={onBack}>← BACK</button>}
-      </div>
+      {screen === "landing"     && <LandingScreen onParticipant={p => { setParticipant(p); setScreen("challenge"); }} onCoordinator={() => setScreen("coordinator")} onLeaderboard={() => setScreen("leaderboard")} />}
+      {screen === "challenge"   && <ChallengeScreen participant={participant} onLeaderboard={() => setScreen("leaderboard")} />}
+      {screen === "leaderboard" && <LeaderboardScreen onBack={() => setScreen(participant ? "challenge" : "landing")} />}
+      {screen === "coordinator" && <CoordinatorScreen onBack={() => setScreen("landing")} />}
     </div>
   );
 }
@@ -301,22 +224,28 @@ function SetupScreen({ onSave, current, onBack }) {
 // ══════════════════════════════════════════════════════════════════════════════
 // LANDING SCREEN
 // ══════════════════════════════════════════════════════════════════════════════
-function LandingScreen({ webAppUrl, onParticipant, onCoordinator, onLeaderboard, onSetup }) {
+function LandingScreen({ onParticipant, onCoordinator, onLeaderboard }) {
   const [tab, setTab] = useState("participant");
   const [name, setName] = useState(""); const [usn, setUsn] = useState(""); const [branch, setBranch] = useState("");
   const [coordPass, setCoordPass] = useState(""); const [err, setErr] = useState(""); const [loading, setLoading] = useState(false);
 
   async function handleJoin() {
     if (!name.trim()||!usn.trim()||!branch.trim()) { setErr("All fields are required."); return; }
-    if (!webAppUrl) { setErr("Platform not configured yet. Contact coordinator."); return; }
     setLoading(true); setErr("");
-    const r = await sheetsPost(webAppUrl, "register", { name: name.trim(), usn: usn.trim().toUpperCase(), branch: branch.trim() });
+    const r = await fbRegister({ name: name.trim(), usn: usn.trim().toUpperCase(), branch: branch.trim() });
     setLoading(false);
-    if (r.error) { setErr("Could not connect to Google Sheets. Try again."); return; }
+    if (r.error) { setErr("Could not connect. Try again."); return; }
+
     const key = `debugarena-progress-${usn.trim().toUpperCase()}`;
     const saved = JSON.parse(localStorage.getItem(key) || "{}");
-    onParticipant({ name: name.trim(), usn: usn.trim().toUpperCase(), branch: branch.trim(), savedProgress: saved });
+    onParticipant({
+      name: name.trim(),
+      usn: usn.trim().toUpperCase(),
+      branch: branch.trim(),
+      savedProgress: saved
+    });
   }
+
   function handleCoord() {
     if (coordPass === COORDINATOR_PASS) { setErr(""); onCoordinator(); }
     else setErr("Incorrect password.");
@@ -345,12 +274,11 @@ function LandingScreen({ webAppUrl, onParticipant, onCoordinator, onLeaderboard,
           <Field label="PASSWORD" value={coordPass} onChange={setCoordPass} type="password" placeholder="Coordinator password" />
           {err && <p style={S.err}>{err}</p>}
           <button style={S.btnPrimary} onClick={handleCoord}>ACCESS DASHBOARD →</button>
-          <button style={S.btnGhost} onClick={onSetup}>⚙ Configure Google Sheets</button>
         </>}
         <button style={S.btnGhost} onClick={onLeaderboard}>📊 VIEW LIVE LEADERBOARD</button>
       </div>
       <div style={S.statsRow}>
-        {[["10","Challenges"],["150","Max Points"],["200+","Participants"]].map(([n,l])=>(
+        {[["10","Challenges"],["150","Max Points"],["300+","Participants"]].map(([n,l])=>(
           <div key={l} style={S.statBox}><div style={S.statN}>{n}</div><div style={S.statL}>{l}</div></div>
         ))}
       </div>
@@ -361,7 +289,7 @@ function LandingScreen({ webAppUrl, onParticipant, onCoordinator, onLeaderboard,
 // ══════════════════════════════════════════════════════════════════════════════
 // CHALLENGE SCREEN
 // ══════════════════════════════════════════════════════════════════════════════
-function ChallengeScreen({ participant, webAppUrl, onLeaderboard }) {
+function ChallengeScreen({ participant, onLeaderboard }) {
   const [qIdx, setQIdx] = useState(0);
   const key = `debugarena-progress-${participant.usn}`;
   const saved = participant.savedProgress || {};
@@ -404,8 +332,11 @@ function ChallengeScreen({ participant, webAppUrl, onLeaderboard }) {
       const newSolvedTimes = { ...solvedTimes, [ch.id]: ms };
       setSolvedIds(newSolvedIds);
       setSolvedTimes(newSolvedTimes);
-      localStorage.setItem(key, JSON.stringify({ solvedIds: [...newSolvedIds], solvedTimes: newSolvedTimes }));
-      await sheetsPost(webAppUrl, "submit", {
+      localStorage.setItem(key, JSON.stringify({
+        solvedIds: [...newSolvedIds],
+        solvedTimes: newSolvedTimes
+      }));
+      await fbSubmit({
         usn: participant.usn, name: participant.name, branch: participant.branch,
         qId: ch.id, qTitle: ch.title,
         timeTakenMs: ms, timeFmt: fmtTime(ms),
@@ -414,7 +345,7 @@ function ChallengeScreen({ participant, webAppUrl, onLeaderboard }) {
     } else {
       setOutputType("error"); setResult("wrong");
       setFeedback(r.feedback || "Not correct. Try again.");
-      await sheetsPost(webAppUrl, "submit", {
+      await fbSubmit({
         usn: participant.usn, name: participant.name, branch: participant.branch,
         qId: ch.id, qTitle: ch.title,
         timeTakenMs: Date.now()-startRef.current, timeFmt: fmtTime(Date.now()-startRef.current),
@@ -516,7 +447,7 @@ function ChallengeScreen({ participant, webAppUrl, onLeaderboard }) {
             {feedback && <div style={S.feedbackBox}>{feedback}</div>}
           </div>
 
-          {result==="correct" && <div style={S.correctBanner}>🎉 CORRECT! +{ch.points} points · Saved to Google Sheets!</div>}
+          {result==="correct" && <div style={S.correctBanner}>🎉 CORRECT! +{ch.points} points · Saved!</div>}
           {result==="wrong"   && <div style={S.wrongBanner}>❌ Not correct. Attempts: {attempts}. Read the hint and try again.</div>}
 
           <div style={S.actionRow}>
@@ -535,17 +466,16 @@ function ChallengeScreen({ participant, webAppUrl, onLeaderboard }) {
 // ══════════════════════════════════════════════════════════════════════════════
 // LEADERBOARD SCREEN
 // ══════════════════════════════════════════════════════════════════════════════
-function LeaderboardScreen({ webAppUrl, onBack }) {
+function LeaderboardScreen({ onBack }) {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState(null);
 
   async function load() {
     setLoading(true);
-    const r = await sheetsCall(webAppUrl, "leaderboard");
-    if (r.participants && r.submissions) {
-      setData(buildLb(r.participants, r.submissions));
-    }
+    const r = await fbGetLeaderboard();
+    const lb = buildLb(r.participants, r.submissions);
+    setData(lb);
     setLoading(false);
     setLastRefresh(new Date().toLocaleTimeString());
   }
@@ -554,12 +484,12 @@ function LeaderboardScreen({ webAppUrl, onBack }) {
 
   function buildLb(parts, subs) {
     return parts.map(p => {
-      const usn = p[1];
-      const correct = subs.filter(s => s[0]===usn && s[8]==="YES");
-      const uniqueQ = [...new Map(correct.map(s=>[s[3],s])).values()];
-      const totalScore = uniqueQ.reduce((a,s)=>{const c=CHALLENGES.find(ch=>ch.id==s[3]);return a+(c?c.points:0);},0);
-      const totalTime = uniqueQ.reduce((a,s)=>a+Number(s[5]),0);
-      return { name:p[0], usn, branch:p[2], totalScore, totalTime, solved:uniqueQ.length };
+      const usn = p.usn;
+      const correct = subs.filter(s => s.usn===usn && s.correct===true);
+      const uniqueQ = [...new Map(correct.map(s=>[s.qId,s])).values()];
+      const totalScore = uniqueQ.reduce((a,s)=>{const c=CHALLENGES.find(ch=>ch.id==s.qId);return a+(c?c.points:0);},0);
+      const totalTime = uniqueQ.reduce((a,s)=>a+Number(s.timeTakenMs),0);
+      return { name:p.name, usn, branch:p.branch, totalScore, totalTime, solved:uniqueQ.length };
     }).sort((a,b)=>b.totalScore-a.totalScore||a.totalTime-b.totalTime);
   }
 
@@ -577,7 +507,7 @@ function LeaderboardScreen({ webAppUrl, onBack }) {
       </div>
       <div style={S.lbContainer}>
         <div style={S.lbTitle}>🏆 LIVE RANKINGS</div>
-        {loading && <div style={{color:"#3a5a7a",textAlign:"center",padding:40}}>Loading from Google Sheets…</div>}
+        {loading && <div style={{color:"#3a5a7a",textAlign:"center",padding:40}}>Loading…</div>}
         {!loading && data.length===0 && <div style={{color:"#3a5a7a",textAlign:"center",padding:40}}>No participants yet.</div>}
         {data.map((p,i)=>(
           <div key={p.usn} style={{...S.lbRow,...(i<3?S.lbTop:{})}}>
@@ -612,7 +542,7 @@ function LeaderboardScreen({ webAppUrl, onBack }) {
 // ══════════════════════════════════════════════════════════════════════════════
 // COORDINATOR DASHBOARD
 // ══════════════════════════════════════════════════════════════════════════════
-function CoordinatorScreen({ webAppUrl, onBack }) {
+function CoordinatorScreen({ onBack }) {
   const [tab, setTab] = useState("leaderboard");
   const [raw, setRaw] = useState({ participants:[], submissions:[] });
   const [loading, setLoading] = useState(true);
@@ -621,8 +551,8 @@ function CoordinatorScreen({ webAppUrl, onBack }) {
 
   async function load() {
     setLoading(true);
-    const r = await sheetsCall(webAppUrl, "leaderboard");
-    if (r.participants) setRaw(r);
+    const r = await fbGetLeaderboard();
+    setRaw(r);
     setLoading(false);
     setLastRefresh(new Date().toLocaleTimeString());
   }
@@ -630,12 +560,12 @@ function CoordinatorScreen({ webAppUrl, onBack }) {
 
   function buildLb() {
     return raw.participants.map(p=>{
-      const usn=p[1];
-      const correct=raw.submissions.filter(s=>s[0]===usn&&s[8]==="YES");
-      const uniqueQ=[...new Map(correct.map(s=>[s[3],s])).values()];
-      const totalScore=uniqueQ.reduce((a,s)=>{const c=CHALLENGES.find(ch=>ch.id==s[3]);return a+(c?c.points:0);},0);
-      const totalTime=uniqueQ.reduce((a,s)=>a+Number(s[5]),0);
-      return{name:p[0],usn,branch:p[2],totalScore,totalTime,solved:uniqueQ.length,solvedIds:uniqueQ.map(s=>s[3])};
+      const usn=p.usn;
+      const correct=raw.submissions.filter(s=>s.usn===usn&&s.correct===true);
+      const uniqueQ=[...new Map(correct.map(s=>[s.qId,s])).values()];
+      const totalScore=uniqueQ.reduce((a,s)=>{const c=CHALLENGES.find(ch=>ch.id==s.qId);return a+(c?c.points:0);},0);
+      const totalTime=uniqueQ.reduce((a,s)=>a+Number(s.timeTakenMs),0);
+      return{name:p.name,usn,branch:p.branch,totalScore,totalTime,solved:uniqueQ.length,solvedIds:uniqueQ.map(s=>s.qId)};
     }).sort((a,b)=>b.totalScore-a.totalScore||a.totalTime-b.totalTime);
   }
 
@@ -644,8 +574,8 @@ function CoordinatorScreen({ webAppUrl, onBack }) {
     const rows = [["Rank","Name","USN","Branch","Score","Solved","Total Time",...CHALLENGES.map(c=>`Q${c.id}:${c.title}`)]];
     lb.forEach((p,i)=>{
       const qCols = CHALLENGES.map(c=>{
-        const s=raw.submissions.find(sub=>sub[0]===p.usn&&sub[3]==c.id&&sub[8]==="YES");
-        return s?s[6]:"—";
+        const s=raw.submissions.find(sub=>sub.usn===p.usn&&sub.qId==c.id&&sub.correct===true);
+        return s?s.timeFmt:"—";
       });
       rows.push([i+1,p.name,p.usn,p.branch,p.totalScore,p.solved,fmtTime(p.totalTime),...qCols]);
     });
@@ -657,7 +587,7 @@ function CoordinatorScreen({ webAppUrl, onBack }) {
 
   const lb = buildLb();
   const activeCount = lb.filter(p=>p.solved>0).length;
-  const totalSolves = raw.submissions.filter(s=>s[8]==="YES").length;
+  const totalSolves = raw.submissions.filter(s=>s.correct===true).length;
 
   return (
     <div style={S.coordRoot}>
@@ -675,7 +605,7 @@ function CoordinatorScreen({ webAppUrl, onBack }) {
 
       <div style={S.statsBar}>
         {[[raw.participants.length,"Registered","#00d4ff"],[activeCount,"Active","#39ff14"],
-          [totalSolves,"Submissions","#ffcc00"],[lb[0]?.name||"—","Leader","#ffd700"]].map(([n,l,c])=>(
+          [totalSolves,"Correct Submissions","#ffcc00"],[lb[0]?.name||"—","Leader","#ffd700"]].map(([n,l,c])=>(
           <div key={l} style={{textAlign:"center",padding:"12px 24px",borderRight:"1px solid #0d2040"}}>
             <div style={{color:c,fontFamily:"'Share Tech Mono',monospace",fontSize:"1.2rem",fontWeight:700}}>{n}</div>
             <div style={{fontSize:"0.62rem",color:"#3a5a7a",letterSpacing:1,marginTop:2}}>{l}</div>
@@ -692,7 +622,7 @@ function CoordinatorScreen({ webAppUrl, onBack }) {
       </div>
 
       <div style={S.coordContent}>
-        {loading && <div style={{color:"#3a5a7a",padding:40,textAlign:"center"}}>Loading from Google Sheets…</div>}
+        {loading && <div style={{color:"#3a5a7a",padding:40,textAlign:"center"}}>Loading from Firebase…</div>}
 
         {!loading && tab==="leaderboard" && (
           <div style={{overflowX:"auto"}}>
@@ -731,17 +661,17 @@ function CoordinatorScreen({ webAppUrl, onBack }) {
             </div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:12}}>
               {raw.participants.filter(p=>
-                !search||p[0].toLowerCase().includes(search.toLowerCase())||p[1].toLowerCase().includes(search.toLowerCase())||p[2].toLowerCase().includes(search.toLowerCase())
+                !search||p.name.toLowerCase().includes(search.toLowerCase())||p.usn.toLowerCase().includes(search.toLowerCase())||p.branch.toLowerCase().includes(search.toLowerCase())
               ).map(p=>{
-                const usn=p[1];
-                const corr=raw.submissions.filter(s=>s[0]===usn&&s[8]==="YES");
-                const uniq=[...new Map(corr.map(s=>[s[3],s])).values()];
-                const score=uniq.reduce((a,s)=>{const c=CHALLENGES.find(ch=>ch.id==s[3]);return a+(c?c.points:0);},0);
+                const usn=p.usn;
+                const corr=raw.submissions.filter(s=>s.usn===usn&&s.correct===true);
+                const uniq=[...new Map(corr.map(s=>[s.qId,s])).values()];
+                const score=uniq.reduce((a,s)=>{const c=CHALLENGES.find(ch=>ch.id==s.qId);return a+(c?c.points:0);},0);
                 return (
                   <div key={usn} style={S.participantCard}>
-                    <div style={{fontWeight:700,color:"#fff"}}>{p[0]}</div>
+                    <div style={{fontWeight:700,color:"#fff"}}>{p.name}</div>
                     <div style={{fontFamily:"'Share Tech Mono',monospace",color:"#00d4ff",fontSize:"0.76rem",margin:"3px 0"}}>{usn}</div>
-                    <div style={{fontSize:"0.78rem",color:"#3a5a7a",marginBottom:8}}>{p[2]}</div>
+                    <div style={{fontSize:"0.78rem",color:"#3a5a7a",marginBottom:8}}>{p.branch}</div>
                     <div style={{display:"flex",gap:16}}>
                       <div><div style={{color:"#39ff14",fontWeight:700}}>{score}</div><div style={{fontSize:"0.62rem",color:"#3a5a7a"}}>pts</div></div>
                       <div><div style={{color:"#ffcc00"}}>{uniq.length}</div><div style={{fontSize:"0.62rem",color:"#3a5a7a"}}>solved</div></div>
@@ -758,11 +688,11 @@ function CoordinatorScreen({ webAppUrl, onBack }) {
             <div style={S.coordSectionTitle}>📋 QUESTION ANALYTICS</div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:12}}>
               {CHALLENGES.map(ch=>{
-                const allSubs=raw.submissions.filter(s=>s[3]==ch.id);
-                const corr=allSubs.filter(s=>s[8]==="YES");
-                const uniqueParticipants=[...new Set(allSubs.map(s=>s[0]))];
-                const rate=uniqueParticipants.length>0?Math.round(corr.filter((s,i,a)=>a.findIndex(x=>x[0]===s[0])===i).length/uniqueParticipants.length*100):0;
-                const avgTime=corr.length?corr.reduce((a,s)=>a+Number(s[5]),0)/corr.length:0;
+                const allSubs=raw.submissions.filter(s=>s.qId==ch.id);
+                const corr=allSubs.filter(s=>s.correct===true);
+                const uniqueParticipants=[...new Set(allSubs.map(s=>s.usn))];
+                const rate=uniqueParticipants.length>0?Math.round(corr.filter((s,i,a)=>a.findIndex(x=>x.usn===s.usn)===i).length/uniqueParticipants.length*100):0;
+                const avgTime=corr.length?corr.reduce((a,s)=>a+Number(s.timeTakenMs),0)/corr.length:0;
                 return (
                   <div key={ch.id} style={S.qCard}>
                     <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
@@ -771,7 +701,7 @@ function CoordinatorScreen({ webAppUrl, onBack }) {
                     </div>
                     <div style={{fontWeight:700,color:"#fff",marginBottom:8}}>{ch.title}</div>
                     <div style={{display:"flex",gap:16,fontSize:"0.85rem"}}>
-                      <div><span style={{color:"#00d4ff"}}>{corr.filter((s,i,a)=>a.findIndex(x=>x[0]===s[0])===i).length}</span><span style={{color:"#3a5a7a",fontSize:"0.7rem",marginLeft:4}}>solved</span></div>
+                      <div><span style={{color:"#00d4ff"}}>{corr.filter((s,i,a)=>a.findIndex(x=>x.usn===s.usn)===i).length}</span><span style={{color:"#3a5a7a",fontSize:"0.7rem",marginLeft:4}}>solved</span></div>
                       <div><span style={{color:"#ff6b35",fontFamily:"'Share Tech Mono',monospace"}}>{avgTime?fmtTime(avgTime):"—"}</span><span style={{color:"#3a5a7a",fontSize:"0.7rem",marginLeft:4}}>avg time</span></div>
                       <div><span style={{color:"#ffcc00"}}>{uniqueParticipants.length}</span><span style={{color:"#3a5a7a",fontSize:"0.7rem",marginLeft:4}}>attempted</span></div>
                     </div>
@@ -815,27 +745,6 @@ const CSS = `
 
 const S = {
   app:{minHeight:"100vh",background:"#040810",color:"#c8e0f4",fontFamily:"'Rajdhani',sans-serif",backgroundImage:"repeating-linear-gradient(0deg,transparent,transparent 39px,#00d4ff05 39px,#00d4ff05 40px),repeating-linear-gradient(90deg,transparent,transparent 39px,#00d4ff05 39px,#00d4ff05 40px)"},
-  setupBanner:{background:"#ffcc0011",borderBottom:"1px solid #ffcc0044",padding:"8px 20px",fontSize:"0.82rem",color:"#ffcc00",textAlign:"center"},
-  inlineBtnLink:{background:"none",border:"none",color:"#00d4ff",cursor:"pointer",fontFamily:"'Rajdhani',sans-serif",fontSize:"0.82rem",textDecoration:"underline"},
-  setupRoot:{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:24},
-  setupBox:{width:"100%",maxWidth:680,background:"#080f1a",border:"1px solid #0d2040",padding:"36px 32px"},
-  setupTitle:{fontFamily:"'Orbitron',monospace",fontSize:"1.1rem",fontWeight:700,color:"#00d4ff",textAlign:"center",marginTop:8,marginBottom:4},
-  setupDesc:{textAlign:"center",color:"#3a5a7a",fontSize:"0.82rem",marginBottom:24,letterSpacing:1},
-  steps:{display:"flex",flexDirection:"column",gap:14,marginBottom:24},
-  step:{display:"flex",gap:14,alignItems:"flex-start"},
-  stepN:{width:28,height:28,borderRadius:"50%",background:"#00d4ff",color:"#000",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Orbitron',monospace",fontSize:"0.8rem",fontWeight:900,flexShrink:0,marginTop:2},
-  stepTitle:{fontWeight:700,color:"#fff",marginBottom:3},
-  stepBody:{color:"#7aa0c0",fontSize:"0.84rem",lineHeight:1.5},
-  scriptBox:{background:"#020609",border:"1px solid #0d2040",borderRadius:4,overflow:"hidden",marginBottom:4},
-  scriptHdr:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 12px",background:"#080f1a",borderBottom:"1px solid #0d2040"},
-  scriptPre:{padding:"12px 14px",fontFamily:"'Share Tech Mono',monospace",fontSize:"0.72rem",color:"#6090b0",lineHeight:1.5,margin:0,overflowX:"auto",maxHeight:200,overflowY:"auto"},
-  copyBtn:{padding:"4px 12px",background:"#00d4ff22",border:"1px solid #00d4ff",color:"#00d4ff",cursor:"pointer",fontFamily:"'Orbitron',monospace",fontSize:"0.65rem",borderRadius:2},
-  okMsg:{padding:"10px 14px",background:"#39ff1411",border:"1px solid #39ff14",borderRadius:3,color:"#39ff14",fontSize:"0.84rem",marginTop:10},
-  errMsg:{padding:"10px 14px",background:"#ff224411",border:"1px solid #ff2244",borderRadius:3,color:"#ff2244",fontSize:"0.84rem",marginTop:10},
-  btnGhost2:{padding:"10px 20px",background:"none",border:"1px solid #0d2040",color:"#3a5a7a",cursor:"pointer",fontFamily:"'Rajdhani',sans-serif",fontSize:"0.85rem",borderRadius:3},
-  btnPrimary2:{flex:1,padding:"10px 20px",background:"#00d4ff",color:"#000",border:"none",cursor:"pointer",fontFamily:"'Orbitron',monospace",fontSize:"0.78rem",fontWeight:700,letterSpacing:1,borderRadius:3},
-  lbl:{display:"block",fontSize:"0.68rem",letterSpacing:1.5,color:"#3a5a7a",marginBottom:4,textTransform:"uppercase"},
-  input:{width:"100%",padding:"10px 12px",background:"#040810",border:"1px solid #0d2040",color:"#c8e0f4",fontFamily:"'Share Tech Mono',monospace",fontSize:"0.85rem",outline:"none",borderRadius:3},
   landing:{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:32,gap:24},
   landingBox:{width:"100%",maxWidth:480,background:"#080f1a",border:"1px solid #0d2040",padding:"36px 32px",boxShadow:"0 0 60px #00d4ff0a"},
   logoMark:{fontFamily:"'Orbitron',monospace",fontSize:"2rem",fontWeight:900,textAlign:"center",marginBottom:4,letterSpacing:3,textShadow:"0 0 30px #00d4ff33"},
