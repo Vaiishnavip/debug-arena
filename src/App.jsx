@@ -263,9 +263,9 @@ function LandingScreen({ onParticipant, onCoordinator}) {
           ))}
         </div>
         {tab==="participant" && <>
-          <Field label="FULL NAME" value={name} onChange={setName} placeholder="e.g. Ravi Kumar" />
-          <Field label="USN" value={usn} onChange={setUsn} placeholder="e.g. 1MS21CS001" />
-          <Field label="BRANCH" value={branch} onChange={setBranch} placeholder="e.g. CSE, ECE, ME" />
+          <Field label="FULL NAME" value={name} onChange={setName} placeholder="Enter Your Response" />
+          <Field label="USN" value={usn} onChange={setUsn} placeholder="Enter your USN" />
+          <Field label="BRANCH" value={branch} onChange={setBranch} placeholder="Enter your Branch" />
           {err && <p style={S.err}>{err}</p>}
           <button style={S.btnPrimary} onClick={handleJoin} disabled={loading}>{loading?"Registering…":"ENTER ARENA →"}</button>
         </>}
